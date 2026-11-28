@@ -56,7 +56,7 @@ struct TimetableView: View {
                                 Text(dayLabels[i])
                                     .font(.subheadline.weight(.semibold))
                                     .padding(.horizontal, 14).padding(.vertical, 8)
-                                    .background(i == selectedDay ? Color.cyan.opacity(0.25) : Color.white.opacity(0.05))
+                                    .background(i == selectedDay ? Color.cyan.opacity(0.25) : Color(.secondarySystemFill))
                                     .clipShape(Capsule())
                             }
                             .buttonStyle(.plain)
@@ -202,7 +202,7 @@ private struct QCMSheet: View {
                             Spacer()
                         }
                         .padding(12)
-                        .background(.white.opacity(0.05))
+                        .background(Color(.secondarySystemFill))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(.plain)

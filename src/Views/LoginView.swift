@@ -29,12 +29,12 @@ struct LoginView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding(14)
-                        .background(.white.opacity(0.06))
+                        .background(Color(.secondarySystemFill))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     SecureField("Mot de passe", text: $password)
                         .textContentType(.password)
                         .padding(14)
-                        .background(.white.opacity(0.06))
+                        .background(Color(.secondarySystemFill))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
                     if let error {
