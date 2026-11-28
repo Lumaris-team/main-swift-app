@@ -17,7 +17,7 @@ struct SubjectsView: View {
                         Text(String(J.str(s, "subject_name").prefix(1)).uppercased())
                             .font(.title3.weight(.bold))
                             .frame(width: 44, height: 44)
-                            .background(store.theme.accent.opacity(0.15))
+                            .background(store.theme.accent.opacity(0.25))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         VStack(alignment: .leading, spacing: 3) {
                             Text(J.str(s, "subject_name")).font(.body.weight(.medium))
@@ -26,17 +26,21 @@ struct SubjectsView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                    .themeCard()
                 }
                 .buttonStyle(.plain)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .overlay {
                 if store.subjects.isEmpty && !store.isLoading {
                     ContentUnavailableView("Aucune matière", systemImage: "book.closed",
                                            description: Text("Créez votre première matière avec +."))
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(store.theme.background)
             .navigationTitle("Matières")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -105,9 +109,16 @@ struct SubjectDetailView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(J.str(c, "lesson_name")).foregroundStyle(.primary)
-                                    if J.bool(c, "awaiting_evaluation") {
-                                        Text("En attente d'évaluation")
-                                            .font(.caption2).foregroundStyle(.orange)
+                                    HStack(spacing: 8) {
+                                        if J.bool(c, "awaiting_evaluation") {
+                                            Text("En attente d'évaluation")
+                                                .font(.caption2).foregroundStyle(.orange)
+                                        }
+                                        let fcCount = ChapterDetailView.flashcards(of: c).count
+                                        if fcCount > 0 {
+                                            Label("\(fcCount)", systemImage: "rectangle.on.rectangle")
+                                                .font(.caption2).foregroundStyle(store.theme.accent)
+                                        }
                                     }
                                 }
                                 Spacer()
@@ -127,8 +138,6 @@ struct SubjectDetailView: View {
                     Text("Chapitres (\(chapters.count))")
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(store.theme.background)
             .navigationTitle(J.str(subject, "subject_name"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -169,6 +178,18 @@ struct ChapterDetailView: View {
     let onClose: () -> Void
     @State private var editing = false
     @State private var confirmDelete = false
+    @State private var revealed: Set<Int> = []
+
+    /// Parse the `flashcards` JSON column → [{front, back, ...}].
+    static func flashcards(of chapter: [String: Any]) -> [[String: Any]] {
+        let raw = J.str(chapter, "flashcards")
+        guard !raw.isEmpty, raw != "[]",
+              let data = raw.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) else { return [] }
+        if let dict = json as? [String: Any], let cards = dict["cards"] as? [[String: Any]] { return cards }
+        if let arr = json as? [[String: Any]] { return arr }
+        return []
+    }
 
     var body: some View {
         NavigationStack {
@@ -203,12 +224,30 @@ struct ChapterDetailView: View {
                     Section("Cours") {
                         Text(J.str(chapter, "body"))
                             .font(.callout)
-                            .lineLimit(20)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                if !J.str(chapter, "raw_lessons").isEmpty {
+                    Section("Support de cours") {
+                        Text(J.str(chapter, "raw_lessons"))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                let fcCards = Self.flashcards(of: chapter)
+                if !fcCards.isEmpty {
+                    Section("Flashcards (\(fcCards.count)) — touchez pour retourner") {
+                        ForEach(fcCards.indices, id: \.self) { i in
+                            FlashcardRow(card: fcCards[i], index: i, accent: store.theme.accent, revealed: revealed.contains(i)) {
+                                if revealed.contains(i) { revealed.remove(i) } else { revealed.insert(i) }
+                            }
+                        }
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(store.theme.background)
             .navigationTitle("Chapitre")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -238,6 +277,50 @@ struct ChapterDetailView: View {
 
 private extension Dictionary where Key == String, Value == Any {
     var lessonRowId: Int { J.int(self, "lesson_id") }
+}
+
+// MARK: - Flashcard row (tap to flip)
+
+private struct FlashcardRow: View {
+    let card: [String: Any]
+    let index: Int
+    let accent: Color
+    let revealed: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Carte \(index + 1)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(accent)
+                    Spacer()
+                    if let kind = J.optStr(card, "kind"), !kind.isEmpty {
+                        Text(kind).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Image(systemName: revealed ? "eye.fill" : "eye")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Text(J.str(card, "front"))
+                    .font(.callout.weight(.medium))
+                    .multilineTextAlignment(.leading)
+                if revealed {
+                    Divider()
+                    Text(J.str(card, "back"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .themeCard(padding: 12)
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+    }
 }
 
 // MARK: - Subject editor

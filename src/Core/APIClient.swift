@@ -105,4 +105,9 @@ final class APIClient {
     func learning(_ action: String, _ payload: [String: Any] = [:]) async throws -> [String: Any] {
         J.dict(try await call("api/learning/\(action)", body: payload)) ?? [:]
     }
+
+    /// GET /api/dump — full export of every D1 table (offline mirror source).
+    func dump() async throws -> [String: Any] {
+        J.dict(try await call("api/dump", method: "GET")) ?? [:]
+    }
 }

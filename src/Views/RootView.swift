@@ -24,20 +24,20 @@ struct WorkspaceTabs: View {
         Group {
             if let store {
                 TabView(selection: $tab) {
-                    WebWorkspaceView()
-                        .tabItem { Label("Espace", systemImage: "globe") }
-                        .tag(0)
                     TasksView(store: store)
                         .tabItem { Label("Tâches", systemImage: "checklist") }
-                        .tag(1)
+                        .tag(0)
                     SubjectsView(store: store)
                         .tabItem { Label("Matières", systemImage: "book.closed") }
-                        .tag(2)
+                        .tag(1)
                     TimetableView(store: store)
-                        .tabItem { Label("Emploi du temps", systemImage: "calendar") }
-                        .tag(3)
+                        .tabItem { Label("Planning", systemImage: "calendar") }
+                        .tag(2)
                 }
                 .tint(store.theme.accent)
+                .font(store.theme.font)
+                .background { store.theme.backgroundView() }
+                .preferredColorScheme(.dark)
                 .task {
                     await store.loadAll()
                     // Force a fresh widget snapshot on every app launch.

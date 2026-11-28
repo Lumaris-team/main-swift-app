@@ -40,12 +40,8 @@ struct TimetableView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("Semaine", selection: $week) {
-                    Text("Cette semaine").tag(0)
-                    Text("Semaine suivante").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal).padding(.top, 8)
+                PillPicker(options: ["Cette semaine", "Semaine prochaine"], selection: $week, accent: store.theme.accent)
+                    .padding(.horizontal).padding(.top, 10)
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -55,8 +51,9 @@ struct TimetableView: View {
                             } label: {
                                 Text(dayLabels[i])
                                     .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 14).padding(.vertical, 8)
-                                    .background(i == selectedDay ? store.theme.accent.opacity(0.25) : Color(.secondarySystemFill))
+                                    .padding(.horizontal, 16).padding(.vertical, 8)
+                                    .background(i == selectedDay ? store.theme.accent : Color.white.opacity(0.14))
+                                    .foregroundStyle(i == selectedDay ? Color.white : Color.primary)
                                     .clipShape(Capsule())
                             }
                             .buttonStyle(.plain)
@@ -76,6 +73,7 @@ struct TimetableView: View {
                         CourseCard(course: c, accent: store.theme.accent)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
@@ -87,7 +85,6 @@ struct TimetableView: View {
                     }
                 }
             }
-            .background(store.theme.background)
             .navigationTitle("Emploi du temps")
             .refreshable { await load() }
             .task { if data == nil { await load() } }
@@ -164,7 +161,7 @@ private struct CourseCard: View {
                 Text("Annulé").font(.caption2).foregroundStyle(.red)
             }
         }
-        .padding(.vertical, 4)
+        .themeCard()
         .opacity(cancelled ? 0.5 : 1)
     }
 }

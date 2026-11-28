@@ -44,12 +44,9 @@ struct TasksView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("Filtre", selection: $filter) {
-                    ForEach(filters.indices, id: \.self) { Text(filters[$0]).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+                PillPicker(options: filters, selection: $filter, accent: store.theme.accent)
+                    .padding(.horizontal)
+                    .padding(.vertical, 10)
 
                 List {
                     ForEach(rows, id: \.row.taskId) { entry in
@@ -58,6 +55,7 @@ struct TasksView: View {
                         }
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             if !entry.table.hasPrefix("trash") {
                                 Button {
@@ -87,6 +85,7 @@ struct TasksView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
                 .searchable(text: $query, prompt: "Rechercher…")
                 .overlay {
                     if rows.isEmpty && !store.isLoading {
@@ -98,8 +97,6 @@ struct TasksView: View {
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(store.theme.background)
             .navigationTitle("Tâches")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -179,7 +176,7 @@ private struct TaskRow: View {
                 }
                 Spacer()
             }
-            .padding(.vertical, 4)
+            .themeCard()
         }
         .buttonStyle(.plain)
     }

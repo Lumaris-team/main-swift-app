@@ -18,7 +18,49 @@ final class WorkspaceStore: ObservableObject {
 
     static let tableOrder = ["tasks", "repeat_tasks", "events", "repeat_events", "trash_tasks", "trash_events"]
 
+    /// Populate the store from the on-disk mirror so the app works fully
+    /// offline; the network refresh in loadAll() overwrites it.
+    private func hydrateFromMirror() {
+        let mirror = LocalMirror.shared
+        var t: [String: [[String: Any]]] = [:]
+        for table in Self.tableOrder {
+            let rows = mirror.rows(database: "timetable", table: table)
+            if !rows.isEmpty { t[table] = rows }
+        }
+        if !t.isEmpty { tables = t }
+        let s = mirror.rows(database: "subjects_data", table: "subjects")
+        if !s.isEmpty { subjects = s }
+        let c = mirror.rows(database: "subjects_data", table: "chapters")
+        if !c.isEmpty { chapters = c }
+        let customization = mirror.rows(database: "settings", table: "customization")
+        if let row = customization.first, !row.isEmpty {
+            theme = AppTheme(settings: row)
+        }
+    }
+
+    /// Rewrite the core tables to the mirror, then fetch /api/dump in the
+    /// background to mirror every other D1 table (emails, school_data, …).
+    private func persistAndDump(tasksTables: [String: [[String: Any]]],
+                                subjectsRows: [[String: Any]],
+                                chapterRows: [[String: Any]]) {
+        let mirror = LocalMirror.shared
+        for (table, rows) in tasksTables { mirror.save(database: "timetable", table: table, rows: rows) }
+        mirror.save(database: "subjects_data", table: "subjects", rows: subjectsRows)
+        mirror.save(database: "subjects_data", table: "chapters", rows: chapterRows)
+        Task {
+            guard let dump = try? await api.dump(),
+                  let dbs = J.dict(dump["databases"]) else { return }
+            for (db, tables) in dbs {
+                guard let tableMap = tables as? [String: Any] else { continue }
+                for (table, rows) in tableMap {
+                    mirror.save(database: db, table: table, rows: rows)
+                }
+            }
+        }
+    }
+
     func loadAll() async {
+        hydrateFromMirror()
         isLoading = true
         lastError = nil
         defer { isLoading = false }
@@ -40,6 +82,7 @@ final class WorkspaceStore: ObservableObject {
                let settings = J.dict(J.dict(resp)?["settings"]) {
                 theme = AppTheme(settings: settings)
             }
+            persistAndDump(tasksTables: tables, subjectsRows: subjects, chapterRows: chapters)
             // Refresh home-screen widgets with the fresh data (throttled).
             Task { await WidgetSync.refresh(store: self) }
         } catch {

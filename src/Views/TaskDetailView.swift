@@ -58,8 +58,6 @@ struct TaskDetailView: View {
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(store.theme.background)
             .navigationTitle("Tâche")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
