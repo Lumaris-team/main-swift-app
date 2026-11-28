@@ -37,7 +37,11 @@ struct WorkspaceTabs: View {
                         .tabItem { Label("Emploi du temps", systemImage: "calendar") }
                         .tag(3)
                 }
-                .task { await store.loadAll() }
+                .task {
+                    await store.loadAll()
+                    // Force a fresh widget snapshot on every app launch.
+                    Task { await WidgetSync.refresh(store: store, force: true) }
+                }
             } else {
                 ProgressView()
                     .task {

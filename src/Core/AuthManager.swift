@@ -1,4 +1,5 @@
 import Foundation
+import WidgetKit
 
 /// Session state — mirrors `lib/auth.js`: JWT + one-time token, renewed via
 /// `/api/auth/exchange` on the main worker (30 min JWT lifetime).
@@ -117,6 +118,8 @@ final class AuthManager: ObservableObject {
         }
         // The web workspace keeps its own copy of the session — wipe it too.
         Task { await SessionBridge.shared.clear() }
+        WidgetSnapshotStore.clear()
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     private func persist(jwt: String, oneTimeToken: String, username: String) {

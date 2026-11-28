@@ -100,4 +100,9 @@ final class APIClient {
     func edPost(_ subpath: String, _ payload: [String: Any]) async throws -> [String: Any] {
         J.dict(try await call("api/ed/\(subpath)", body: payload)) ?? [:]
     }
+
+    /// POST /api/learning/<action> — chapters, flashcards, learn sessions.
+    func learning(_ action: String, _ payload: [String: Any] = [:]) async throws -> [String: Any] {
+        J.dict(try await call("api/learning/\(action)", body: payload)) ?? [:]
+    }
 }

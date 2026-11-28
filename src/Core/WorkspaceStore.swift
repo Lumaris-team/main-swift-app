@@ -34,6 +34,8 @@ final class WorkspaceStore: ObservableObject {
             subjects = J.array(s["subjects"])
             chapters = J.array(s["chapters"])
             meta = J.dict(m["meta"])?.mapValues { J.array($0) } ?? [:]
+            // Refresh home-screen widgets with the fresh data (throttled).
+            Task { await WidgetSync.refresh(store: self) }
         } catch {
             lastError = error.localizedDescription
         }
