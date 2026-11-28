@@ -9,7 +9,13 @@ final class AuthManager: ObservableObject {
     @Published private(set) var jwtExp: Date = .distantPast
     @Published private(set) var isAuthenticated = false
 
-    private var oneTimeToken: String?
+    /// Readable for the web-workspace seed script; the page owns renewals.
+    private(set) var oneTimeToken: String?
+
+    /// Per-login marker stored in web storage: tells the seed script whether
+    /// it already injected this session's tokens (avoids clobbering the
+    /// page's self-renewed credentials on reload).
+    private(set) var seedId: String?
 
     init() {
         restore()
@@ -22,6 +28,7 @@ final class AuthManager: ObservableObject {
               let exp = Double(expStr) else { return }
         username = user
         oneTimeToken = token
+        seedId = Keychain.read("seedId")
         jwtExp = Date(timeIntervalSince1970: exp)
         jwt = Keychain.read("jwt")
         // JWT may be expired — APIClient will renew lazily on first call.
@@ -67,6 +74,7 @@ final class AuthManager: ObservableObject {
         self.username = username
         self.jwt = jwt
         self.oneTimeToken = ott
+        self.seedId = UUID().uuidString
         persist(jwt: jwt, oneTimeToken: ott, username: username)
         await exchange() // get a fresh JWT + rotated one-time token
         isAuthenticated = true
@@ -102,10 +110,13 @@ final class AuthManager: ObservableObject {
         username = nil
         jwt = nil
         oneTimeToken = nil
+        seedId = nil
         isAuthenticated = false
-        for key in ["jwt", "oneTimeToken", "username", "jwtExp"] {
+        for key in ["jwt", "oneTimeToken", "username", "jwtExp", "seedId"] {
             Keychain.delete(key)
         }
+        // The web workspace keeps its own copy of the session — wipe it too.
+        Task { await SessionBridge.shared.clear() }
     }
 
     private func persist(jwt: String, oneTimeToken: String, username: String) {
@@ -123,6 +134,7 @@ final class AuthManager: ObservableObject {
         Keychain.save("oneTimeToken", oneTimeToken)
         Keychain.save("username", username)
         Keychain.save("jwtExp", String(jwtExp.timeIntervalSince1970))
+        if let seedId { Keychain.save("seedId", seedId) }
     }
 
     private func padBase64(_ s: String) -> String {

@@ -4,6 +4,7 @@ import Foundation
 /// `https://<service>-client-worker.<username>-cloudflare-account.workers.dev`
 enum Config {
     static let turnstileSiteKey = "0x4AAAAAAGBRuixsOkHxqB2N"
+    static let siteBase = "https://lumaris.fr.eu.org"
 
     static func encoded(_ username: String) -> String {
         username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username

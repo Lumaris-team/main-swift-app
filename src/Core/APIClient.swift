@@ -29,15 +29,24 @@ final class APIClient {
     @discardableResult
     func call(_ path: String, method: String = "POST", body: [String: Any]? = nil,
               extraHeaders: [String: String] = [:]) async throws -> Any? {
-        guard let base = auth.workerBase, let token = auth.jwt else {
+        guard let base = auth.workerBase else { throw APIError.notAuthenticated }
+        // The web workspace owns session renewal — read its freshest JWT.
+        // Fall back to the native session only when no web view exists.
+        let viaWeb = SessionBridge.shared.webView != nil
+        guard let token = viaWeb
+                ? await SessionBridge.shared.token(workerBase: base)
+                : auth.jwt else {
             throw APIError.notAuthenticated
         }
         var request = try makeRequest(base: base, path: path, method: method, body: body, token: token, extraHeaders: extraHeaders)
         var (data, response) = try await URLSession.shared.data(for: request)
 
         if let http = response as? HTTPURLResponse, http.statusCode == 401 {
-            // JWT rejected — rotate via exchange and retry once.
-            if await auth.exchange(), let fresh = auth.jwt {
+            // JWT rejected — rotate and retry once.
+            let fresh: String? = viaWeb
+                ? await SessionBridge.shared.forceRenew(workerBase: base)
+                : (await auth.exchange() ? auth.jwt : nil)
+            if let fresh {
                 request = try makeRequest(base: base, path: path, method: method, body: body, token: fresh, extraHeaders: extraHeaders)
                 (data, response) = try await URLSession.shared.data(for: request)
             }

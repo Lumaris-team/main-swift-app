@@ -24,15 +24,18 @@ struct WorkspaceTabs: View {
         Group {
             if let store {
                 TabView(selection: $tab) {
+                    WebWorkspaceView()
+                        .tabItem { Label("Espace", systemImage: "globe") }
+                        .tag(0)
                     TasksView(store: store)
                         .tabItem { Label("Tâches", systemImage: "checklist") }
-                        .tag(0)
+                        .tag(1)
                     SubjectsView(store: store)
                         .tabItem { Label("Matières", systemImage: "book.closed") }
-                        .tag(1)
+                        .tag(2)
                     TimetableView(api: store.api)
                         .tabItem { Label("Emploi du temps", systemImage: "calendar") }
-                        .tag(2)
+                        .tag(3)
                 }
                 .task { await store.loadAll() }
             } else {
