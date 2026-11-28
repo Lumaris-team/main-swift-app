@@ -98,6 +98,8 @@ struct TasksView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(store.theme.background)
             .navigationTitle("Tâches")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -165,7 +167,7 @@ private struct TaskRow: View {
                             Text(store.chapterName(J.int(entry.row, "chapter_id")))
                                 .font(.caption2)
                                 .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(.cyan.opacity(0.15))
+                                .background(store.theme.accent.opacity(0.15))
                                 .clipShape(Capsule())
                         }
                         if !J.str(entry.row, "frequency").isEmpty {

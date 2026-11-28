@@ -1,8 +1,9 @@
 import Foundation
 import WidgetKit
 
-/// Session state — mirrors `lib/auth.js`: JWT + one-time token, renewed via
-/// `/api/auth/exchange` on the main worker (30 min JWT lifetime).
+/// Session state — mirrors `lib/auth.js`: JWT (1h) + one-time refresh token
+/// (30 days, single-use rotating), renewed via `/api/auth/exchange` on the
+/// main worker.
 @MainActor
 final class AuthManager: ObservableObject {
     @Published private(set) var username: String?
@@ -19,6 +20,11 @@ final class AuthManager: ObservableObject {
     private(set) var seedId: String?
 
     init() {
+        // Whatever side renews last writes both stores: the web view mirrors
+        // Keychain so neither holder of the single-use token goes stale.
+        SessionBridge.shared.onSession = { [weak self] jwt, ott, user, exp in
+            self?.persistFromBridge(jwt: jwt, oneTimeToken: ott, username: user, exp: exp)
+        }
         restore()
     }
 
@@ -48,7 +54,8 @@ final class AuthManager: ObservableObject {
 
     /// POST /api/login. The worker intentionally never responds on failure —
     /// a timeout surfaces as the generic credentials error, like the web.
-    func login(username: String, password: String, turnstileToken: String) async throws {
+    /// The app authenticates with `appKey` instead of a Turnstile token.
+    func login(username: String, password: String) async throws {
         let url = Config.authWorkerBase(username: username).appendingPathComponent("api/login")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -57,7 +64,7 @@ final class AuthManager: ObservableObject {
         req.httpBody = try JSONSerialization.data(withJSONObject: [
             "username": username,
             "password": password,
-            "turnstileToken": turnstileToken,
+            "appKey": Config.appLoginKey,
         ])
 
         let (data, resp): (Data, URLResponse)
@@ -124,8 +131,8 @@ final class AuthManager: ObservableObject {
     }
 
     private func persist(jwt: String, oneTimeToken: String, username: String) {
-        // JWT exp claim → renewal time (default 30 min like the web).
-        var exp: TimeInterval = 1800
+        // JWT exp claim → renewal time (1h lifetime set by the auth worker).
+        var exp: TimeInterval = 3600
         let parts = jwt.split(separator: ".")
         if parts.count >= 2,
            let payload = Data(base64Encoded: padBase64(String(parts[1]))),
@@ -139,6 +146,26 @@ final class AuthManager: ObservableObject {
         Keychain.save("username", username)
         Keychain.save("jwtExp", String(jwtExp.timeIntervalSince1970))
         if let seedId { Keychain.save("seedId", seedId) }
+        // Mirror into the web workspace so the page's renewal uses the
+        // freshest one-time token (single-use — stores must not diverge).
+        Task {
+            await SessionBridge.shared.storeSession(
+                jwt: jwt, oneTimeToken: oneTimeToken, username: username, exp: jwtExp
+            )
+        }
+    }
+
+    /// Called by SessionBridge when the web view reports a newer session —
+    /// keeps Keychain in sync without writing back to the page.
+    func persistFromBridge(jwt: String, oneTimeToken: String, username: String, exp: Date) {
+        self.jwt = jwt
+        self.oneTimeToken = oneTimeToken
+        self.username = username
+        jwtExp = exp
+        Keychain.save("jwt", jwt)
+        Keychain.save("oneTimeToken", oneTimeToken)
+        Keychain.save("username", username)
+        Keychain.save("jwtExp", String(exp.timeIntervalSince1970))
     }
 
     private func padBase64(_ s: String) -> String {

@@ -17,7 +17,7 @@ struct SubjectsView: View {
                         Text(String(J.str(s, "subject_name").prefix(1)).uppercased())
                             .font(.title3.weight(.bold))
                             .frame(width: 44, height: 44)
-                            .background(.cyan.opacity(0.15))
+                            .background(store.theme.accent.opacity(0.15))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         VStack(alignment: .leading, spacing: 3) {
                             Text(J.str(s, "subject_name")).font(.body.weight(.medium))
@@ -35,6 +35,8 @@ struct SubjectsView: View {
                                            description: Text("Créez votre première matière avec +."))
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(store.theme.background)
             .navigationTitle("Matières")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -125,6 +127,8 @@ struct SubjectDetailView: View {
                     Text("Chapitres (\(chapters.count))")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(store.theme.background)
             .navigationTitle(J.str(subject, "subject_name"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -203,6 +207,8 @@ struct ChapterDetailView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(store.theme.background)
             .navigationTitle("Chapitre")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

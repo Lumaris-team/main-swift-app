@@ -10,6 +10,7 @@ final class WorkspaceStore: ObservableObject {
     @Published var meta: [String: [[String: Any]]] = [:]
     @Published var isLoading = false
     @Published var lastError: String?
+    @Published var theme = AppTheme()
 
     let api: APIClient
 
@@ -25,6 +26,7 @@ final class WorkspaceStore: ObservableObject {
             async let tasksResp = api.tasks("list", ["tables": Self.tableOrder])
             async let subjectsResp = api.subjects("list", ["all_chapters": true])
             async let metaResp = api.tasks("meta")
+            async let settingsResp = api.call("api/settings/customization", method: "GET")
             let (t, s, m) = try await (tasksResp, subjectsResp, metaResp)
             if let tt = J.dict(t["tables"]) {
                 tables = tt.mapValues { J.array($0) }
@@ -34,6 +36,10 @@ final class WorkspaceStore: ObservableObject {
             subjects = J.array(s["subjects"])
             chapters = J.array(s["chapters"])
             meta = J.dict(m["meta"])?.mapValues { J.array($0) } ?? [:]
+            if let resp = try? await settingsResp,
+               let settings = J.dict(J.dict(resp)?["settings"]) {
+                theme = AppTheme(settings: settings)
+            }
             // Refresh home-screen widgets with the fresh data (throttled).
             Task { await WidgetSync.refresh(store: self) }
         } catch {

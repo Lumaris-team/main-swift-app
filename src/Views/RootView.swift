@@ -33,10 +33,11 @@ struct WorkspaceTabs: View {
                     SubjectsView(store: store)
                         .tabItem { Label("Matières", systemImage: "book.closed") }
                         .tag(2)
-                    TimetableView(api: store.api)
+                    TimetableView(store: store)
                         .tabItem { Label("Emploi du temps", systemImage: "calendar") }
                         .tag(3)
                 }
+                .tint(store.theme.accent)
                 .task {
                     await store.loadAll()
                     // Force a fresh widget snapshot on every app launch.
