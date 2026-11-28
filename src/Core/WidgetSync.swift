@@ -1,14 +1,20 @@
 import Foundation
 import WidgetKit
 
-/// Builds the widget snapshot from live workspace + ÉcoleDirecte data and
-/// pushes it to the App Group. Called after `WorkspaceStore.loadAll()` —
-/// throttled so frequent mutations don't hammer the ED API — and forced on
-/// app launch. Every section is best-effort: a failure keeps the rest.
+/// Builds the widget snapshot AND the Shortcuts JSON payloads from live
+/// workspace + ÉcoleDirecte data, then pushes everything to the App Group.
+/// Called after `WorkspaceStore.loadAll()` — throttled so frequent mutations
+/// don't hammer the ED API — and forced on app launch. Every section is
+/// best-effort: a failure keeps the rest.
 @MainActor
 enum WidgetSync {
     private static var lastRun: Date = .distantPast
     private static let minInterval: TimeInterval = 300 // 5 min
+
+    private static let gradeTerms = ["trimestre1", "trimestre2", "trimestre3", "examen_blanc", "annee"]
+    private static let termLabels = ["trimestre1": "T1", "trimestre2": "T2", "trimestre3": "T3", "examen_blanc": "EB", "annee": "Année"]
+    private static let dayNames = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
+    private static let dayOrder = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 
     static func refresh(store: WorkspaceStore, force: Bool = false) async {
         if !force, Date().timeIntervalSince(lastRun) < minInterval { return }
@@ -43,8 +49,16 @@ enum WidgetSync {
         snap.tasksDueToday = today
         snap.taskItems = open.prefix(4).map {
             WidgetSnapshot.Item(title: $0.title,
-                                sub: $0.subject.isEmpty ? (J.fmtDate($0.date)) : "\($0.subject) · \(J.fmtDate($0.date))")
+                                sub: $0.subject.isEmpty ? J.fmtDate($0.date) : "\($0.subject) · \(J.fmtDate($0.date))")
         }
+
+        // JSON: all open tasks
+        saveJSON("tasksOpen", [
+            "count": open.count,
+            "tasks": open.map {
+                ["title": $0.title, "date": isoDay($0.date), "subject": $0.subject]
+            },
+        ])
 
         // --- Next chapter test ---
         let upcoming = store.chapters
@@ -59,93 +73,189 @@ enum WidgetSync {
             snap.nextTestDate = J.fmtDate(next.date)
             snap.nextTestDays = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: next.date)).day ?? -1
         }
+        saveJSON("nextTest", [
+            "title": snap.nextTestTitle,
+            "subject": snap.nextTestSubject,
+            "date": snap.nextTestDate,
+            "days": snap.nextTestDays,
+        ])
 
         // --- Flashcards SM-2 ---
         if let status = try? await store.api.learning("review-status") {
             snap.cardsDue = J.int(status, "due")
             snap.cardsTotal = J.int(status, "total")
+            saveJSON("flashcards", [
+                "total": snap.cardsTotal, "due": snap.cardsDue,
+                "mature": J.int(status, "mature"), "fresh": J.int(status, "fresh"),
+            ])
         }
 
         // --- ÉcoleDirecte (best effort — may be slow or need QCM) ---
-        await refreshGrades(store: store, snap: &snap)
-        await refreshHomeworks(store: store, snap: &snap)
+        await refreshED(store: store, snap: &snap)
 
         WidgetSnapshotStore.save(snap)
         WidgetCenter.shared.reloadAllTimelines()
     }
 
-    // MARK: - ÉcoleDirecte sections
+    // MARK: - ÉcoleDirecte: snapshot fields + JSON payloads
 
-    private static func refreshGrades(store: WorkspaceStore, snap: inout WidgetSnapshot) async {
-        // Latest grade across all terms/subjects, sorted by date desc.
-        if let grades = try? await store.api.ed("grades", headers: ["filter": "true"]),
-           !J.bool(grades, "qcm_required") {
-            var best: (date: String, title: String, subject: String, value: String)?
-            for (term, matieres) in grades {
-                guard ["trimestre1", "trimestre2", "trimestre3", "examen_blanc", "annee"].contains(term),
-                      let subjects = J.dict(matieres) else { continue }
-                for (subject, notesAny) in subjects {
-                    for note in J.array(notesAny) {
-                        let date = J.str(note, "date")
-                        guard !date.isEmpty else { continue }
-                        let value = gradeValue(note)
-                        let title = J.str(note, "titre").isEmpty ? "Évaluation" : J.str(note, "titre")
-                        if best == nil || date > best!.date {
-                            best = (date, title, subject, value)
-                        }
+    private static func refreshED(store: WorkspaceStore, snap: inout WidgetSnapshot) async {
+        async let gradesResp = try? store.api.ed("grades", headers: ["filter": "true"])
+        async let averagesResp = try? store.api.ed("averages")
+        async let hwResp = try? store.api.ed("homeworks", headers: ["filter": "true"])
+        async let ttResp = try? store.api.ed("timetable", headers: ["filter": "true"])
+        let (grades, averages, homeworks, timetable) = await (gradesResp, averagesResp, hwResp, ttResp)
+
+        // ----- Grades -----
+        var gradeItems: [[String: Any]] = []
+        if let g = grades, !J.bool(g, "qcm_required") {
+            gradeItems = flattenGrades(g)
+            // Latest grade → widget
+            if let latest = gradeItems.first {
+                snap.lastGradeTitle = J.str(latest, "title")
+                snap.lastGradeSubject = J.str(latest, "subject")
+                snap.lastGradeValue = J.str(latest, "value20")
+                snap.lastGradeDate = J.str(latest, "date")
+            }
+            // "New grades" = keys absent from the previous sync's seen set.
+            let keys = Set(gradeItems.map { gradeKey($0) })
+            if let seen = ShortcutJSONStore.seenGradeKeys() {
+                let fresh = gradeItems.filter { !seen.contains(gradeKey($0)) }
+                saveJSON("newGrades", [
+                    "count": fresh.count,
+                    "grades": fresh,
+                ])
+            } else {
+                saveJSON("newGrades", ["count": 0, "grades": [], "note": "first_sync"])
+            }
+            ShortcutJSONStore.saveSeenGradeKeys(keys)
+        }
+        saveJSON("allGrades", ["count": gradeItems.count, "grades": gradeItems])
+
+        // ----- Averages -----
+        var avgPayload: [String: Any] = [:]
+        if let a = averages, !J.bool(a, "qcm_required") {
+            for (key, term) in a {
+                guard let t = J.dict(term), let avg = t["moyenne_generale"] as? Double, avg > 0 else { continue }
+                avgPayload[key] = (avg * 100).rounded() / 100
+            }
+            // Widget: prefer "annee"
+            if let year = avgPayload["annee"] as? Double {
+                snap.average = year
+                snap.averageLabel = "Moyenne année"
+            } else if let first = avgPayload.values.compactMap({ $0 as? Double }).first {
+                snap.average = first
+                snap.averageLabel = "Moyenne"
+            }
+        }
+        saveJSON("averages", avgPayload)
+
+        // ----- Homeworks -----
+        var hwItems: [[String: Any]] = []
+        if let h = homeworks, !J.bool(h, "qcm_required"), let byDate = J.dict(h["data"]) {
+            for (date, listAny) in byDate {
+                for d in J.array(listAny) {
+                    let done = J.bool(d, "fait") || J.bool(d, "effectue")
+                        || J.bool(J.dict(d["aFaire"]) ?? [:], "fait")
+                    hwItems.append([
+                        "date": date,
+                        "title": hwTitle(d),
+                        "subject": hwSubject(d),
+                        "done": done,
+                    ])
+                }
+            }
+            hwItems.sort { J.str($0, "date") < J.str($1, "date") }
+            let openHw = hwItems.filter { !J.bool($0, "done") }
+            snap.homeworkOpen = openHw.count
+            snap.homeworkItems = openHw.prefix(3).map {
+                WidgetSnapshot.Item(title: J.str($0, "title"),
+                                    sub: "\(J.str($0, "subject").isEmpty ? "" : "\(J.str($0, "subject")) · ")\(J.str($0, "date"))")
+            }
+        }
+        saveJSON("homeworksOpen", [
+            "count": hwItems.filter { !J.bool($0, "done") }.count,
+            "items": hwItems.filter { !J.bool($0, "done") },
+        ])
+
+        // ----- Timetable: cancelled courses + today -----
+        if let t = timetable, !J.bool(t, "qcm_required") {
+            var cancelled: [[String: Any]] = []
+            for (weekKey, weekLabel) in [("semaineA", "A"), ("semaineB", "B")] {
+                guard let week = J.dict(t[weekKey]) else { continue }
+                for day in dayOrder {
+                    for c in J.array(week[day]) where isCancelled(c) {
+                        cancelled.append([
+                            "week": weekLabel, "day": day,
+                            "subject": courseSubject(c),
+                            "start": J.str(c, "horaireDebut"), "end": J.str(c, "horaireFin"),
+                            "teacher": J.str(c, "enseignant"), "room": J.str(c, "salle"),
+                        ])
                     }
                 }
             }
-            if let b = best {
-                snap.lastGradeTitle = b.title
-                snap.lastGradeSubject = b.subject
-                snap.lastGradeValue = b.value
-                snap.lastGradeDate = b.date
-            }
-        }
+            saveJSON("cancelledCourses", ["count": cancelled.count, "courses": cancelled])
 
-        // General average — prefer "annee", fall back to any numeric term.
-        if let averages = try? await store.api.ed("averages"), !J.bool(averages, "qcm_required") {
-            var candidates: [(key: String, avg: Double)] = []
-            for (key, term) in averages {
-                guard let t = J.dict(term), let avg = t["moyenne_generale"] as? Double, avg > 0 else { continue }
-                candidates.append((key, avg))
-            }
-            if let pick = candidates.first(where: { $0.key == "annee" }) ?? candidates.first {
-                snap.average = pick.avg
-                snap.averageLabel = pick.key == "annee" ? "Moyenne année" : "Moyenne \(pick.key)"
-            }
+            // Today's courses (current week, not cancelled)
+            let todayName = dayNames[Calendar.current.component(.weekday, from: Date())]
+            let todayCourses = J.array(J.dict(t["semaineA"])?[todayName])
+                .filter { !isCancelled($0) }
+                .sorted { J.str($0, "horaireDebut") < J.str($1, "horaireDebut") }
+                .map { c in
+                    [
+                        "subject": courseSubject(c),
+                        "start": J.str(c, "horaireDebut"), "end": J.str(c, "horaireFin"),
+                        "teacher": J.str(c, "enseignant"), "room": J.str(c, "salle"),
+                    ] as [String: Any]
+                }
+            saveJSON("todayCourses", ["day": todayName, "count": todayCourses.count, "courses": todayCourses])
         }
     }
 
-    private static func gradeValue(_ note: [String: Any]) -> String {
-        let v = J.str(note, "note").replacingOccurrences(of: ",", with: ".")
-        let s = J.str(note, "noteSur").replacingOccurrences(of: ",", with: ".")
+    // MARK: - Payload builders
+
+    /// Flatten the ED grades tree into a sorted list (most recent first).
+    private static func flattenGrades(_ resp: [String: Any]) -> [[String: Any]] {
+        var items: [[String: Any]] = []
+        for (term, matieres) in resp {
+            guard gradeTerms.contains(term), let subjects = J.dict(matieres) else { continue }
+            for (subject, notesAny) in subjects {
+                for n in J.array(notesAny) {
+                    items.append([
+                        "subject": subject,
+                        "title": J.str(n, "titre").isEmpty ? "Évaluation" : J.str(n, "titre"),
+                        "term": termLabels[term] ?? term,
+                        "note": J.str(n, "note"),
+                        "noteSur": J.str(n, "noteSur"),
+                        "value20": gradeValue20(n),
+                        "coefficient": J.str(n, "coefficient"),
+                        "date": J.str(n, "date"),
+                    ])
+                }
+            }
+        }
+        items.sort { J.str($0, "date") > J.str($1, "date") }
+        return items
+    }
+
+    private static func gradeKey(_ g: [String: Any]) -> String {
+        "\(J.str(g, "subject"))|\(J.str(g, "title"))|\(J.str(g, "date"))|\(J.str(g, "note"))"
+    }
+
+    private static func gradeValue20(_ n: [String: Any]) -> String {
+        let v = J.str(n, "note").replacingOccurrences(of: ",", with: ".")
+        let s = J.str(n, "noteSur").replacingOccurrences(of: ",", with: ".")
         guard let vn = Double(v), let sn = Double(s), sn > 0 else { return "" }
-        return String(format: "%.1f/%.0f", vn / sn * 20, sn)
+        return String(format: "%.1f/20", vn / sn * 20)
     }
 
-    private static func refreshHomeworks(store: WorkspaceStore, snap: inout WidgetSnapshot) async {
-        guard let resp = try? await store.api.ed("homeworks", headers: ["filter": "true"]),
-              !J.bool(resp, "qcm_required"),
-              let byDate = J.dict(resp["data"]) else { return }
+    private static func isCancelled(_ c: [String: Any]) -> Bool {
+        J.bool(c, "isAnnule") || J.str(c, "isAnnule") == "true"
+    }
 
-        var open: [(date: String, title: String, subject: String)] = []
-        for (date, listAny) in byDate {
-            for d in J.array(listAny) {
-                let done = J.bool(d, "fait") || J.bool(d, "effectue")
-                    || J.bool(J.dict(d["aFaire"]) ?? [:], "fait")
-                guard !done else { continue }
-                let title = hwTitle(d)
-                guard !title.isEmpty else { continue }
-                open.append((date, title, hwSubject(d)))
-            }
-        }
-        open.sort { $0.date < $1.date }
-        snap.homeworkOpen = open.count
-        snap.homeworkItems = open.prefix(3).map {
-            WidgetSnapshot.Item(title: $0.title, sub: "\($0.subject.isEmpty ? "" : "\($0.subject) · ")\($0.date)")
-        }
+    private static func courseSubject(_ c: [String: Any]) -> String {
+        let s = J.str(c, "matiereEnseignee")
+        return s.isEmpty ? (J.str(c, "libelle").isEmpty ? "Cours" : J.str(c, "libelle")) : s
     }
 
     private static func hwTitle(_ d: [String: Any]) -> String {
@@ -161,5 +271,23 @@ enum WidgetSync {
     private static func hwSubject(_ d: [String: Any]) -> String {
         if let m = J.dict(d["matiere"]), let s = J.optStr(m, "libelle") ?? J.optStr(m, "nom") { return s }
         return J.str(d, "matiereEnseignement")
+    }
+
+    // MARK: - JSON helpers
+
+    private static func isoDay(_ d: Date?) -> String {
+        guard let d else { return "" }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: d)
+    }
+
+    private static func saveJSON(_ key: String, _ payload: [String: Any]) {
+        var enriched = payload
+        enriched["generated_at"] = ISO8601DateFormatter().string(from: Date())
+        guard JSONSerialization.isValidJSONObject(enriched),
+              let data = try? JSONSerialization.data(withJSONObject: enriched, options: [.prettyPrinted, .sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return }
+        ShortcutJSONStore.save(key, json)
     }
 }

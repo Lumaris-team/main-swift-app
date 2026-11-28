@@ -119,6 +119,7 @@ final class AuthManager: ObservableObject {
         // The web workspace keeps its own copy of the session — wipe it too.
         Task { await SessionBridge.shared.clear() }
         WidgetSnapshotStore.clear()
+        ShortcutJSONStore.clearAll()
         WidgetCenter.shared.reloadAllTimelines()
     }
 
